@@ -68,16 +68,25 @@ impl ReadTiming {
 }
 
 static TIMING: Mutex<Cell<ReadTiming>> = Mutex::new(Cell::new(ReadTiming::new(u32::MAX)));
+static INNER: Mutex<Cell<ReadTiming>> = Mutex::new(Cell::new(ReadTiming::new(u32::MAX)));
 static PRESENCE: Mutex<Cell<ReadTiming>> = Mutex::new(Cell::new(ReadTiming::new(u32::MAX)));
 static WRITE_ONE: Mutex<Cell<ReadTiming>> = Mutex::new(Cell::new(ReadTiming::new(u32::MAX)));
 
 /// Reset before acquisition, with a budget based on the actual CPU clock.
 pub fn reset(budget_cycles: u32) {
-    critical_section::with(|cs| TIMING.borrow(cs).set(ReadTiming::new(budget_cycles)));
+    critical_section::with(|cs| {
+        TIMING.borrow(cs).set(ReadTiming::new(budget_cycles));
+        INNER.borrow(cs).set(ReadTiming::new(budget_cycles));
+    });
 }
 
 pub fn snapshot() -> ReadTiming {
     critical_section::with(|cs| TIMING.borrow(cs).get())
+}
+
+/// Narrower CPU interval: after driving low until before the data GPIO read.
+pub fn inner_snapshot() -> ReadTiming {
+    critical_section::with(|cs| INNER.borrow(cs).get())
 }
 
 /// Presence sampling is timed from before reset release to after GPIO read.
@@ -116,6 +125,13 @@ pub(crate) fn record(cs: CriticalSection<'_>, started: u32, ended: u32) {
     let mut timing = TIMING.borrow(cs).get();
     timing.observe(ended.wrapping_sub(started));
     TIMING.borrow(cs).set(timing);
+}
+
+#[cfg(target_arch = "riscv32")]
+pub(crate) fn record_inner(cs: CriticalSection<'_>, started: u32, ended: u32) {
+    let mut timing = INNER.borrow(cs).get();
+    timing.observe(ended.wrapping_sub(started));
+    INNER.borrow(cs).set(timing);
 }
 
 #[cfg(target_arch = "riscv32")]
@@ -188,6 +204,7 @@ mod tests {
         assert_eq!(snapshot(), ReadTiming::new(1200));
         reset(2400);
         assert_eq!(snapshot(), ReadTiming::new(2400));
+        assert_eq!(inner_snapshot(), ReadTiming::new(2400));
         reset_presence(6000);
         assert_eq!(presence_snapshot(), ReadTiming::new(6000));
         reset_write_one(1200);

@@ -121,17 +121,23 @@ where
             #[cfg(all(feature = "measure-slot-timing", target_arch = "riscv32"))]
             let timing_start = read_timing::cycles();
             self.set_bus_low()?;
+            #[cfg(all(feature = "measure-slot-timing", target_arch = "riscv32"))]
+            let timing_inner_start = read_timing::cycles();
             delay.delay_us(2);
 
             self.release_bus()?;
             delay.delay_us(5);
 
+            #[cfg(all(feature = "measure-slot-timing", target_arch = "riscv32"))]
+            let timing_inner_end = read_timing::cycles();
             let bit_value = self.is_bus_high()?;
             #[cfg(all(feature = "measure-slot-timing", target_arch = "riscv32"))]
             let timing_end = read_timing::cycles();
             delay.delay_us(63); // Keep the complete read slot at 70 us.
             #[cfg(all(feature = "measure-slot-timing", target_arch = "riscv32"))]
             read_timing::record(_cs, timing_start, timing_end);
+            #[cfg(all(feature = "measure-slot-timing", target_arch = "riscv32"))]
+            read_timing::record_inner(_cs, timing_inner_start, timing_inner_end);
             Ok(bit_value)
         })
     }
