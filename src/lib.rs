@@ -104,19 +104,20 @@ where
         })
     }
 
-    /// Reads one bit. The whole slot (~70 us) runs in a critical section:
-    /// the sample happens ~15 us after the slot opens, so an interrupt
-    /// between releasing the bus and sampling biases the bit towards 1.
+    /// Reads one bit. The whole slot (~70 us) runs in a critical section.
+    /// Sample nominally after 7 us, leaving room for GPIO/timer overhead
+    /// inside the DS18B20's 15-us data-valid window. Delaying 6+9 us used
+    /// the entire window before accounting for that overhead.
     pub fn read_bit(&mut self, delay: &mut impl DelayNs) -> OneWireResult<bool, E> {
         critical_section::with(|_| {
             self.set_bus_low()?;
-            delay.delay_us(6); // Maxim recommended wait time
+            delay.delay_us(2);
 
             self.release_bus()?;
-            delay.delay_us(9); // Maxim recommended wait time
+            delay.delay_us(5);
 
             let bit_value = self.is_bus_high()?;
-            delay.delay_us(55); // Maxim recommended wait time
+            delay.delay_us(63); // Keep the complete read slot at 70 us.
             Ok(bit_value)
         })
     }
