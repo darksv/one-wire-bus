@@ -20,6 +20,8 @@ critical-section = "1"
 [features]
 # Optional RISC-V32 read-slot CPU-cycle instrumentation; no default overhead.
 measure-slot-timing = []
+# ESP32-C3 does not implement the standard mcycle CSR.
+measure-slot-timing-esp32c3 = ["measure-slot-timing"]
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }

@@ -2,6 +2,37 @@
 use core::cell::Cell;
 use critical_section::{CriticalSection, Mutex};
 
+/// Generic RISC-V uses mcycle; ESP32-C3 uses its custom MPCCR register.
+pub const COUNTER_CSR: u16 = if cfg!(feature = "measure-slot-timing-esp32c3") {
+    0x7e2
+} else {
+    0xb00
+};
+
+#[cfg(feature = "measure-slot-timing-esp32c3")]
+pub fn esp32c3_cycle_mode_valid(events: u32, mode: u32) -> bool {
+    events & 1 != 0 && mode & 3 == 1 // CYCLE selected, enabled, wrapping.
+}
+
+/// Read configuration only: HAL/RNG also use this shared counter.
+#[cfg(all(feature = "measure-slot-timing-esp32c3", target_arch = "riscv32"))]
+pub fn esp32c3_counter_config() -> (u32, u32) {
+    critical_section::with(|_| {
+        let events: u32;
+        let mode: u32;
+        unsafe {
+            core::arch::asm!(
+                "csrr {events}, 0x7e0",
+                "csrr {mode}, 0x7e1",
+                events = out(reg) events,
+                mode = out(reg) mode,
+                options(nostack)
+            );
+        }
+        (events, mode)
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReadTiming {
     pub samples: u32,
@@ -74,7 +105,8 @@ pub(crate) fn cycles() -> u32 {
     // Default memory clobber deliberately keeps the timestamp ordered with
     // respect to the volatile GPIO access; do not mark this asm `nomem`/`pure`.
     unsafe {
-        core::arch::asm!("csrr {value}, mcycle", value = out(reg) value, options(nostack));
+        core::arch::asm!("csrr {value}, {counter}", value = out(reg) value,
+            counter = const COUNTER_CSR, options(nostack));
     }
     value
 }
@@ -103,6 +135,27 @@ pub(crate) fn record_write_one(cs: CriticalSection<'_>, started: u32, ended: u32
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counter_selection_and_esp32c3_cycle_mode_are_explicit() {
+        assert_eq!(
+            COUNTER_CSR,
+            if cfg!(feature = "measure-slot-timing-esp32c3") {
+                0x7e2
+            } else {
+                0xb00
+            }
+        );
+        #[cfg(feature = "measure-slot-timing-esp32c3")]
+        {
+            assert!(esp32c3_cycle_mode_valid(1, 1));
+            assert!(esp32c3_cycle_mode_valid(3, 1));
+            assert!(!esp32c3_cycle_mode_valid(0, 1));
+            assert!(!esp32c3_cycle_mode_valid(2, 1));
+            assert!(!esp32c3_cycle_mode_valid(1, 0));
+            assert!(!esp32c3_cycle_mode_valid(1, 3));
+        }
+    }
 
     #[test]
     fn records_extrema_and_only_counts_samples_above_the_budget() {
