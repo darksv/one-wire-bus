@@ -160,12 +160,18 @@ where
     /// Writes a 1 bit. Slot in a critical section: an interrupt between the
     /// low phase and the release would stretch the low and turn the 1 into 0.
     pub fn write_1_bit(&mut self, delay: &mut impl DelayNs) -> OneWireResult<(), E> {
-        critical_section::with(|_| {
+        critical_section::with(|_cs| {
+            #[cfg(all(feature = "measure-slot-timing", target_arch = "riscv32"))]
+            let timing_start = read_timing::cycles();
             self.set_bus_low()?;
             delay.delay_us(6); // Maxim recommended wait time
 
             self.release_bus()?;
+            #[cfg(all(feature = "measure-slot-timing", target_arch = "riscv32"))]
+            let timing_end = read_timing::cycles();
             delay.delay_us(64); // Maxim recommended wait time
+            #[cfg(all(feature = "measure-slot-timing", target_arch = "riscv32"))]
+            read_timing::record_write_one(_cs, timing_start, timing_end);
             Ok(())
         })
     }

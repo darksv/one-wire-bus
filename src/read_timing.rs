@@ -38,6 +38,7 @@ impl ReadTiming {
 
 static TIMING: Mutex<Cell<ReadTiming>> = Mutex::new(Cell::new(ReadTiming::new(u32::MAX)));
 static PRESENCE: Mutex<Cell<ReadTiming>> = Mutex::new(Cell::new(ReadTiming::new(u32::MAX)));
+static WRITE_ONE: Mutex<Cell<ReadTiming>> = Mutex::new(Cell::new(ReadTiming::new(u32::MAX)));
 
 /// Reset before acquisition, with a budget based on the actual CPU clock.
 pub fn reset(budget_cycles: u32) {
@@ -55,6 +56,15 @@ pub fn reset_presence(budget_cycles: u32) {
 
 pub fn presence_snapshot() -> ReadTiming {
     critical_section::with(|cs| PRESENCE.borrow(cs).get())
+}
+
+/// Write-one low time is bounded by timestamps bracketing both GPIO writes.
+pub fn reset_write_one(budget_cycles: u32) {
+    critical_section::with(|cs| WRITE_ONE.borrow(cs).set(ReadTiming::new(budget_cycles)));
+}
+
+pub fn write_one_snapshot() -> ReadTiming {
+    critical_section::with(|cs| WRITE_ONE.borrow(cs).get())
 }
 
 #[cfg(target_arch = "riscv32")]
@@ -81,6 +91,13 @@ pub(crate) fn record_presence(cs: CriticalSection<'_>, started: u32, ended: u32)
     let mut timing = PRESENCE.borrow(cs).get();
     timing.observe(ended.wrapping_sub(started));
     PRESENCE.borrow(cs).set(timing);
+}
+
+#[cfg(target_arch = "riscv32")]
+pub(crate) fn record_write_one(cs: CriticalSection<'_>, started: u32, ended: u32) {
+    let mut timing = WRITE_ONE.borrow(cs).get();
+    timing.observe(ended.wrapping_sub(started));
+    WRITE_ONE.borrow(cs).set(timing);
 }
 
 #[cfg(test)]
@@ -119,6 +136,9 @@ mod tests {
         reset(2400);
         assert_eq!(snapshot(), ReadTiming::new(2400));
         reset_presence(6000);
+        assert_eq!(presence_snapshot(), ReadTiming::new(6000));
+        reset_write_one(1200);
+        assert_eq!(write_one_snapshot(), ReadTiming::new(1200));
         assert_eq!(presence_snapshot(), ReadTiming::new(6000));
         assert_eq!(snapshot(), ReadTiming::new(2400));
     }
