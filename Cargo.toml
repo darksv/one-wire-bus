@@ -16,3 +16,10 @@ A Rust implementation of the 1-Wire protocol for embedded-hal
 embedded-hal = {version="1"}
 log = "*"
 critical-section = "1"
+
+[features]
+# Optional RISC-V32 read-slot CPU-cycle instrumentation; no default overhead.
+measure-slot-timing = []
+
+[dev-dependencies]
+critical-section = { version = "1", features = ["std"] }

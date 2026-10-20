@@ -7,6 +7,8 @@ mod address;
 pub mod commands;
 pub mod crc;
 mod error;
+#[cfg(feature = "measure-slot-timing")]
+pub mod read_timing;
 
 pub use address::Address;
 pub use error::{OneWireError, OneWireResult};
@@ -91,15 +93,21 @@ where
     pub fn reset(&mut self, delay: &mut impl DelayNs) -> OneWireResult<bool, E> {
         self.wait_for_high(delay)?;
 
-        critical_section::with(|_| {
+        critical_section::with(|_cs| {
             self.set_bus_low()?;
             delay.delay_us(480); // Maxim recommended wait time
 
+            #[cfg(all(feature = "measure-slot-timing", target_arch = "riscv32"))]
+            let timing_start = read_timing::cycles();
             self.release_bus()?;
             delay.delay_us(70); // Maxim recommended wait time
 
             let device_present = self.is_bus_low()?;
+            #[cfg(all(feature = "measure-slot-timing", target_arch = "riscv32"))]
+            let timing_end = read_timing::cycles();
             delay.delay_us(410); // Maxim recommended wait time
+            #[cfg(all(feature = "measure-slot-timing", target_arch = "riscv32"))]
+            read_timing::record_presence(_cs, timing_start, timing_end);
             Ok(device_present)
         })
     }
@@ -109,7 +117,9 @@ where
     /// inside the DS18B20's 15-us data-valid window. Delaying 6+9 us used
     /// the entire window before accounting for that overhead.
     pub fn read_bit(&mut self, delay: &mut impl DelayNs) -> OneWireResult<bool, E> {
-        critical_section::with(|_| {
+        critical_section::with(|_cs| {
+            #[cfg(all(feature = "measure-slot-timing", target_arch = "riscv32"))]
+            let timing_start = read_timing::cycles();
             self.set_bus_low()?;
             delay.delay_us(2);
 
@@ -117,7 +127,11 @@ where
             delay.delay_us(5);
 
             let bit_value = self.is_bus_high()?;
+            #[cfg(all(feature = "measure-slot-timing", target_arch = "riscv32"))]
+            let timing_end = read_timing::cycles();
             delay.delay_us(63); // Keep the complete read slot at 70 us.
+            #[cfg(all(feature = "measure-slot-timing", target_arch = "riscv32"))]
+            read_timing::record(_cs, timing_start, timing_end);
             Ok(bit_value)
         })
     }
