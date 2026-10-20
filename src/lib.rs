@@ -83,32 +83,42 @@ where
         Err(OneWireError::BusNotHigh)
     }
 
-    /// Sends a reset pulse, then returns true if a device is present
+    /// Sends a reset pulse, then returns true if a device is present.
+    ///
+    /// The pulse itself (~1 ms) runs in a critical section: an interrupt
+    /// landing mid-pulse stretches the low phase and desynchronizes every
+    /// slave. The idle wait stays outside - it has no timing window.
     pub fn reset(&mut self, delay: &mut impl DelayNs) -> OneWireResult<bool, E> {
         self.wait_for_high(delay)?;
 
-        self.set_bus_low()?;
-        delay.delay_us(480); // Maxim recommended wait time
+        critical_section::with(|_| {
+            self.set_bus_low()?;
+            delay.delay_us(480); // Maxim recommended wait time
 
-        self.release_bus()?;
-        delay.delay_us(70); // Maxim recommended wait time
+            self.release_bus()?;
+            delay.delay_us(70); // Maxim recommended wait time
 
-        let device_present = self.is_bus_low()?;
-
-        delay.delay_us(410); // Maxim recommended wait time
-        Ok(device_present)
+            let device_present = self.is_bus_low()?;
+            delay.delay_us(410); // Maxim recommended wait time
+            Ok(device_present)
+        })
     }
 
+    /// Reads one bit. The whole slot (~70 us) runs in a critical section:
+    /// the sample happens ~15 us after the slot opens, so an interrupt
+    /// between releasing the bus and sampling biases the bit towards 1.
     pub fn read_bit(&mut self, delay: &mut impl DelayNs) -> OneWireResult<bool, E> {
-        self.set_bus_low()?;
-        delay.delay_us(6); // Maxim recommended wait time
+        critical_section::with(|_| {
+            self.set_bus_low()?;
+            delay.delay_us(6); // Maxim recommended wait time
 
-        self.release_bus()?;
-        delay.delay_us(9); // Maxim recommended wait time
+            self.release_bus()?;
+            delay.delay_us(9); // Maxim recommended wait time
 
-        let bit_value = self.is_bus_high()?;
-        delay.delay_us(55); // Maxim recommended wait time
-        Ok(bit_value)
+            let bit_value = self.is_bus_high()?;
+            delay.delay_us(55); // Maxim recommended wait time
+            Ok(bit_value)
+        })
     }
 
     pub fn read_byte(&mut self, delay: &mut impl DelayNs) -> OneWireResult<u8, E> {
@@ -132,22 +142,29 @@ where
         Ok(())
     }
 
+    /// Writes a 1 bit. Slot in a critical section: an interrupt between the
+    /// low phase and the release would stretch the low and turn the 1 into 0.
     pub fn write_1_bit(&mut self, delay: &mut impl DelayNs) -> OneWireResult<(), E> {
-        self.set_bus_low()?;
-        delay.delay_us(6); // Maxim recommended wait time
+        critical_section::with(|_| {
+            self.set_bus_low()?;
+            delay.delay_us(6); // Maxim recommended wait time
 
-        self.release_bus()?;
-        delay.delay_us(64); // Maxim recommended wait time
-        Ok(())
+            self.release_bus()?;
+            delay.delay_us(64); // Maxim recommended wait time
+            Ok(())
+        })
     }
 
+    /// Writes a 0 bit (same critical-section rationale as [`Self::write_1_bit`]).
     pub fn write_0_bit(&mut self, delay: &mut impl DelayNs) -> OneWireResult<(), E> {
-        self.set_bus_low()?;
-        delay.delay_us(60); // Maxim recommended wait time
+        critical_section::with(|_| {
+            self.set_bus_low()?;
+            delay.delay_us(60); // Maxim recommended wait time
 
-        self.release_bus()?;
-        delay.delay_us(10); // Maxim recommended wait time
-        Ok(())
+            self.release_bus()?;
+            delay.delay_us(10); // Maxim recommended wait time
+            Ok(())
+        })
     }
 
     pub fn write_bit(&mut self, value: bool, delay: &mut impl DelayNs) -> OneWireResult<(), E> {
